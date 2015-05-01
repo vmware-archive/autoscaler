@@ -21,9 +21,10 @@ Following are the REST style endpoints exposed to take action:
  JSON Input 
  ```
  "[ { "queue" : "testQ1", "app" : "eureka-service", "org" : "platform", "space" : "josh" },
-{ "queue" : "testQ2", "app" : "cf-bg-demo-blue", "org" : "platform", "space" : "mine" }, 
-{ "queue" : "testQ5", "app" : "test-bp", "org" : "platform", "space" : "test" }
-]" ``` 
+    { "queue" : "testQ2", "app" : "cf-bg-demo-blue", "org" : "platform", "space" : "mine" }, 
+    { "queue" : "testQ5", "app" : "test-bp", "org" : "platform", "space" : "test" }
+ ]"
+ ``` 
 
 * DELETE /register/{queueName}  
  Description: Remove the mapping of the destination/queue and app from the Autoscaler.    
@@ -33,15 +34,16 @@ Following are the REST style endpoints exposed to take action:
  JSON Input:
  ```
  "[{ 'DestinationName' : 'testQ2', 'AppName' : 'cf-bg-demo-blue', 'Instances': '1'}
-{ 'DestinationName' : 'testQ3', 'AppName' : 'my-cgm-green', 'Instances': '1'}
-{ 'DestinationName' : 'testQ4', 'AppName' : 'hystrix-sample', 'Instances': '1'}
-{ 'DestinationName' : 'testQ5', 'AppName' : 'wls-test-bp', 'Instances': '1'}
-{ 'DestinationName' : 'testQ1', 'AppName' : 'eureka-service', 'Instances': '1'}]"
-```
+   { 'DestinationName' : 'testQ3', 'AppName' : 'my-cgm-green', 'Instances': '1'}
+   { 'DestinationName' : 'testQ4', 'AppName' : 'hystrix-sample', 'Instances': '1'}
+   { 'DestinationName' : 'testQ5', 'AppName' : 'wls-test-bp', 'Instances': '1'}
+   { 'DestinationName' : 'testQ1', 'AppName' : 'eureka-service', 'Instances': '1'}]"
+  ```
 
 * GET /details/{queueName}  
  Description: Dump data about a registered destination/queue and associated app instance details    
- Sample output: ``` { 'DestinationName' : 'testQ4', 'AppName' : 'hystrix-sample', 'Instances': '1'} ```
+ Sample output: 
+ ``` { 'DestinationName' : 'testQ4', 'AppName' : 'hystrix-sample', 'Instances': '1'} ```
 
 * PUT /scale/{queueName}/up/{increments}  
  Description: Scale up the mapped app instances associated with the Queue in increments
