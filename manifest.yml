@@ -1,0 +1,8 @@
+---
+applications:
+  - name: app_auto_scaler
+    memory: 256M
+    instances: 1
+    buildpack: https://github.com/cloudfoundry/buildpack-go.git
+#    services:
+#      - mysql

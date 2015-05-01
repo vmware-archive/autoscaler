@@ -1,0 +1,14 @@
+{
+	"ImportPath": "github.com/cf-platform-eng/autoscaler",
+	"GoVersion": "go1.3.3",
+	"Packages": [
+		"src/github.com/cf-platform-eng/autoscaler/app_auto_scaler.go"
+	],
+	"Deps": [
+		{
+			"ImportPath": "code.google.com/p/gorest",
+			"Comment": "v0.2-1",
+			"Rev": "7256ac017e82ce21649dd36a89053e74d530981b"
+		}
+	]
+}
