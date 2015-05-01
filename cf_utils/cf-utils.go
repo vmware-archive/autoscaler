@@ -32,7 +32,7 @@ func init() {
 	err := cmd.Run()
 
 	if err != nil {
-		log.Fatal("CF Target not set", err)
+		log.Fatal("CF Target not set \n", err)
 		os.Exit(-1)
 	}
 
