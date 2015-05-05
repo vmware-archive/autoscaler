@@ -1,6 +1,5 @@
 package cf_utils
 
-
 type ErrorResponse struct {
       Code int `json:"code"`
       Description string `json:"description"`

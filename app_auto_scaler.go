@@ -16,33 +16,36 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	//"encoding/json"
+	"time"
 	//"cloudfoundry.com/cf-utils"
-	cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"	
-	scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
+	//cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"
+	//scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
+	cfutils "./cf_utils"
+	scalerutils "./scaler_utils"
 )
 
+var (
+	api_endpoint        string
+	unit_increment      = 1
+	listen_port         string
+	appDetailsMapMutex  = &sync.RWMutex{}
+	appInstanceMapMutex = &sync.RWMutex{}
+	appDetailsMap       map[string]scalerutils.AppDetail
+	appInstanceMap      map[string]scalerutils.AppInstanceDetail
+)
 
-var api_endpoint string
-
-var unit_increment int
-var listen_port string
-
-var appDetailsMapMutex = &sync.RWMutex{}
-var appInstanceMapMutex = &sync.RWMutex{}
-
-var appDetailsMap map[string]scalerutils.AppDetail
-var appInstanceMap map[string]scalerutils.AppInstanceDetail
+// On Cache Expiration of 1 min, reload the app instance data
+const cache_expiration = 60
 
 func init() {
-	listen_port = os.Getenv("PORT")
-	if listen_port == "" {
+	if listen_port = os.Getenv("PORT"); listen_port == "" {
 		listen_port = "8080"
 	}
 
-	fmt.Printf("App Auto Scaler running on Listen Port: %s !!\n", listen_port)
-
-	unit_increment = 1
+	fmt.Printf("App Auto Scaler Properties\n")
+	fmt.Printf("  Listen Port: %s !!\n", listen_port)
+	fmt.Printf("  Instance default increment set to: %d !!\n\n", unit_increment)
+	fmt.Printf("  Instance Cache Expiration set to: %d seconds !!\n", cache_expiration)
 }
 
 func main() {
@@ -55,7 +58,6 @@ func main() {
 	gorest.RegisterService(new(AppAutoScalerService)) //Register our service
 	http.Handle("/", gorest.Handle())
 	http.ListenAndServe(":"+listen_port, nil)
-
 }
 
 //Service Definition
@@ -75,19 +77,25 @@ type AppAutoScalerService struct {
 
 func (serv AppAutoScalerService) Register(appDetail scalerutils.AppDetail) {
 
-	fmt.Printf("\nApp Details ... %v\n", appDetail)
-	destnName := appDetail.TargetQ
+	fmt.Printf("\nRegistering App ... %#v", appDetail)
+	destnName := appDetail.Target
 
+	//fmt.Printf("Getting AD Write lock")
 	appDetailsMapMutex.Lock()
 	appDetailsMap[destnName] = appDetail
 	appDetailsMapMutex.Unlock()
+	
+	if (scalerutils.DBEnabled()) {
+		scalerutils.Insert(appDetail)
+	}
+	//fmt.Printf("Released AD Write lock")
 
 	// Get the actual instance count...
 	appGuidInstanceDetail := cfutils.FindApp(appDetail.Org, appDetail.Space, appDetail.AppName)
 
-    var instances int
-	appGuid := appGuidInstanceDetail["guid"]
-	if appGuid != "" {
+	var instances int
+	var appGuid string
+	if appGuid = appGuidInstanceDetail["guid"]; appGuid != "" {
 		instanceCount, err := strconv.Atoi(appGuidInstanceDetail["instances"])
 
 		if err != nil {
@@ -96,16 +104,21 @@ func (serv AppAutoScalerService) Register(appDetail scalerutils.AppDetail) {
 			instances = instanceCount
 		}
 	} else {
-		fmt.Printf("\nWarning!! App could not be located successfully!\n")
+		fmt.Printf("\nWarning!! Failed to locate App : %s in Org: %s, Space: %s\n", appDetail.AppName, appDetail.Org, appDetail.Space)
+		return
 	}
 
-	fmt.Printf("\nApp: %s under org: %s, space: %s, App Guid: %s, Instances: %d\n", appDetail.AppName, appDetail.Org, appDetail.Space, appGuid, instances)
+	fmt.Printf("\nApp: %s under org: %s, space: %s, app guid: %s, instances: %d", appDetail.AppName, appDetail.Org, appDetail.Space, appGuid, instances)
 
-	appInstanceDetails := scalerutils.AppInstanceDetail{destnName, appDetail.AppName, appGuid, instances}
+	appInstanceDetails := scalerutils.AppInstanceDetail{destnName, appDetail.AppName, appGuid, instances, time.Now().Unix()}
 
+	//fmt.Printf("Getting AI Write lock")
 	appInstanceMapMutex.Lock()
 	appInstanceMap[destnName] = appInstanceDetails
 	appInstanceMapMutex.Unlock()
+	
+	
+	//fmt.Printf("Released AI Write lock")
 }
 
 func (serv AppAutoScalerService) Load(appDetails []scalerutils.AppDetail) {
@@ -114,68 +127,134 @@ func (serv AppAutoScalerService) Load(appDetails []scalerutils.AppDetail) {
 	}
 }
 
+func getDetail(target string) string {
+
+	var output string
+	curTime := time.Now().Unix()
+	appInstance := appInstanceMap[target]
+	
+	if (curTime - appInstance.LastFetchTime) < cache_expiration {
+
+		//fmt.Printf("Getting AI Read lock")
+		appInstanceMapMutex.RLock()
+		output = fmt.Sprintf("{ 'queue' : '%s', 'app' : '%s', 'instances': '%d'}\n", target, appInstance.AppName, appInstance.Instances)
+		appInstanceMapMutex.RUnlock()
+		//fmt.Printf("Released AI Read lock")
+
+		return output
+	}
+
+	appDetail := appDetailsMap[target]
+	appGuidInstanceDetail := cfutils.FindApp(appDetail.Org, appDetail.Space, appDetail.AppName)
+
+	// Acquire Lock before updating...
+	//fmt.Printf("Getting AI Write lock")
+	appInstanceMapMutex.Lock()
+	//fmt.Printf("Got AI Write lock")
+
+	if appGuid := appGuidInstanceDetail["guid"]; appGuid != "" {
+		instanceCount, err := strconv.Atoi(appGuidInstanceDetail["instances"])
+
+		if err != nil {
+			fmt.Printf("Could not convert into int: %v\n", err)
+			output = fmt.Sprintf("Error with Target: %s, could not covert instances count to int: %s", target, err)
+		} else {
+
+			appInstance.Instances = instanceCount
+			output = fmt.Sprintf("{ 'queue' : '%s', 'app' : '%s', 'instances': '%d'}\n", target, appInstance.AppName, appInstance.Instances)
+		}
+
+	} else {
+		appInstance.Instances = 0
+
+		fmt.Printf("\nError!! Failed to locate App : %s in Org: %s, Space: %s\n", appDetail.AppName, appDetail.Org, appDetail.Space)
+
+		output = fmt.Sprintf("\nError!! Failed to locate App : %s in Org: %s, Space: %s\n", appDetail.AppName, appDetail.Org, appDetail.Space)
+	}
+
+	// Update Last fetch time
+	appInstance.LastFetchTime = time.Now().Unix()
+	appInstanceMap[target] = appInstance
+
+	// Release lock
+	appInstanceMapMutex.Unlock()
+	//fmt.Printf("Released AI Write lock")
+
+	return output
+}
+
 func (serv AppAutoScalerService) Details() string {
 	output := "["
-	appInstanceMapMutex.RLock()
-	for key, value := range appInstanceMap {
-		appInstance := value
-		output += fmt.Sprintf("{ 'DestinationName' : '%s', 'AppName' : '%s', 'Instances': '%d'}\n", key, appInstance.AppName, appInstance.Instances)
+	for key := range appInstanceMap {
+		output += getDetail(key) + "\n"
 	}
-	appInstanceMapMutex.RUnlock()
+
 	output = output + "]"
 	return output
 }
 
-func findAppDetail(targetQ string) scalerutils.AppDetail {
+func (serv AppAutoScalerService) QueueDetails(target string) string {
 
-	appDetail := appDetailsMap[targetQ]
+	return getDetail(target)
+}
+
+func findAppDetail(target string) scalerutils.AppDetail {
+
+	appDetail := appDetailsMap[target]
 	return appDetail
 }
 
-func deleteAppDetail(targetQ string) {
+func deleteAppDetail(target string) {
 
-	delete(appDetailsMap, targetQ)
+	delete(appDetailsMap, target)
 }
 
-func findAppInstanceDetail(targetQ string) scalerutils.AppInstanceDetail {
+func findAppInstanceDetail(target string) scalerutils.AppInstanceDetail {
 
-	appInstance := appInstanceMap[targetQ]
+	appInstance := appInstanceMap[target]
 	return appInstance
 }
 
-func deleteAppInstanceDetail(targetQ string) {
+func deleteAppInstanceDetail(target string) {
 
-	delete(appInstanceMap, targetQ)
+	delete(appInstanceMap, target)
 }
 
-func (serv AppAutoScalerService) QueueDetails(targetQ string) string {
-	appInstanceMapMutex.RLock()
-	appInstance := findAppInstanceDetail(targetQ)
-	appInstanceMapMutex.RUnlock()
-
-	if appInstance.AppName == "" {
-		fmt.Printf("Error!! App Instance not found for %s\n", targetQ)
-		return ""
-	}
-
-	return fmt.Sprintf("{ 'DestinationName' : '%s', 'AppName' : '%s', 'Instances': '%d'}\n", targetQ, appInstance.AppName, appInstance.Instances)
+func isAppInstanceNil(appInstance scalerutils.AppInstanceDetail) bool {
+	return appInstance.AppName == ""
 }
 
-func (serv AppAutoScalerService) Deregister(targetQ string) {
+func isAppNil(app scalerutils.AppDetail) bool {
+	return app.AppName == ""
+}
+
+func (serv AppAutoScalerService) Deregister(target string) {
+	//fmt.Printf("Getting AI Write lock")
 	appInstanceMapMutex.Lock()
-	deleteAppInstanceDetail(targetQ)
+	deleteAppInstanceDetail(target)
 	appInstanceMapMutex.Unlock()
+	//fmt.Printf("Releasing AI Write lock")
 
+	//fmt.Printf("Getting AD Write lock")
+	appDetail := appDetailsMap[target]
+	if (scalerutils.DBEnabled()) {
+		scalerutils.Delete(appDetail)
+	}
+	
 	appDetailsMapMutex.Lock()
-	deleteAppDetail(targetQ)
+	deleteAppDetail(target)
 	appDetailsMapMutex.Unlock()
+	//fmt.Printf("Releasing AD Write lock")
+	
 }
 
-func (serv AppAutoScalerService) Scale(targetQ string, increments int, up bool) {
+func (serv AppAutoScalerService) Scale(target string, increments int, up bool) {
+
+	//fmt.Printf("Getting AI Write lock")
 	appInstanceMapMutex.Lock()
-	appInstanceDetails := appInstanceMap[targetQ]
-	if appInstanceDetails.AppName == "" {
-		fmt.Printf("Error!! App Instance not found for %s\n", targetQ)
+	appInstanceDetails := appInstanceMap[target]
+	if isAppInstanceNil(appInstanceDetails) {
+		fmt.Printf("Error!! App Instance not found for %s\n", target)
 		return
 	}
 
@@ -183,9 +262,11 @@ func (serv AppAutoScalerService) Scale(targetQ string, increments int, up bool) 
 		increments = unit_increment
 	}
 
+	direction := "Up"
 	increment := increments
 	if !up {
 		increment = -increment
+		direction = "Down"
 	}
 
 	appInstanceDetails.Instances += increment
@@ -194,27 +275,19 @@ func (serv AppAutoScalerService) Scale(targetQ string, increments int, up bool) 
 		appInstanceDetails.Instances = 0
 	}
 
-	appInstanceMap[targetQ] = appInstanceDetails
+	appInstanceMap[target] = appInstanceDetails
 	appInstanceMapMutex.Unlock()
+	//fmt.Printf("Releasing AI Write lock")
 
-	direction := "Up"
-	if !up {
-		direction = "Down"
-	}
+	fmt.Printf("\nScaling[%s] App : { 'queue' : '%s', 'app' : '%s', 'instances': '%d'}\n", direction, target, appInstanceDetails.AppName, appInstanceDetails.Instances)
 
-	fmt.Printf("Scaling[%s] App : { 'DestinationName' : '%s', 'AppName' : '%s', 'Instances': '%d'}\n", direction, targetQ, appInstanceDetails.AppName, appInstanceDetails.Instances)
-	fmt.Printf("{ 'name' : '%s', 'instance' : '%d'-'%d' }", targetQ, appInstanceMap[targetQ].Instances, appInstanceDetails.Instances)
-
-	/*
-	   command := "curl /v2/apps/" + appInstanceDetails.AppGuid
-	   payload := fmt.Sprintf("{ \"instances\": %d }", appInstanceDetails.Instances)
-	*/
+	cfutils.ScaleApp(appInstanceDetails.AppName, appInstanceDetails.Instances)
 }
 
-func (serv AppAutoScalerService) ScaleUp(postdata string, targetQ string, increments int) {
-	serv.Scale(targetQ, increments, true)
+func (serv AppAutoScalerService) ScaleUp(postdata string, target string, increments int) {
+	serv.Scale(target, increments, true)
 }
 
-func (serv AppAutoScalerService) ScaleDown(postdata string, targetQ string, increments int) {
-	serv.Scale(targetQ, increments, false)
+func (serv AppAutoScalerService) ScaleDown(postdata string, target string, increments int) {
+	serv.Scale(target, increments, false)
 }
