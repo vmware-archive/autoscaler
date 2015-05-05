@@ -1,12 +1,3 @@
-//
-//A RESTful style web-services framework for the Go language. </br>
-//Creating services in Go is straight forward, GoRest? takes this a step further by adding a layer that
-//makes tedious tasks much more automated and avoids regular pitfalls. <br/>
-//This gives you the opportunity to focus more on the task at hand... minor low-level http handling.<br/>
-//
-//
-//Example usage below:
-//
 package main
 
 import (
@@ -17,8 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"
-	scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
+   cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"
+   scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
 )
 
 var (

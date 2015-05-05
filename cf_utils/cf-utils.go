@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-   uaac  "github.com/cf-platform-eng/autoscaler/cf_utils/uaac"
 	"io/ioutil"
 	"net/http"
 	"crypto/tls"
+   "github.com/cf-platform-eng/autoscaler/uaac"
 )
 
 var (
