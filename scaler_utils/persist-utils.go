@@ -35,9 +35,17 @@ func init() {
  	//err := json.Unmarshal(jsonBlob, &creds)
 	if (err != nil) {
 		fmt.Println("Error: ", err)
+		dbEnabled = false
+		return
 	}
 	//fmt.Printf("Unmarshalled: %#v\n", creds)
 	fmt.Printf("Vcap Services: %#v\n", vcapServices)
+
+  if (len(vcapServices.MySqlServiceDefn) == 0 &&
+      len(vcapServices.MongoDbServiceDefn) == 0) {
+		dbEnabled = false
+		return
+ }
 	
 	dbString := vcapServices.MySqlServiceDefn[0].Credentials.Uri
 	if (dbType == "MongoDb") {
