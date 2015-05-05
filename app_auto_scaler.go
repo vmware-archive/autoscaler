@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 	//"cloudfoundry.com/cf-utils"
-	//cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"
-	//scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
-	cfutils "./cf_utils"
-	scalerutils "./scaler_utils"
+	cfutils "github.com/cf-platform-eng/autoscaler/cf_utils"
+	scalerutils "github.com/cf-platform-eng/autoscaler/scaler_utils"
+	//cfutils "./cf_utils"
+	//scalerutils "./scaler_utils"
 )
 
 var (
