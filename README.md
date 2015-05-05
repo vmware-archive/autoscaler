@@ -1,15 +1,20 @@
 # autoscaler
-This is a experimental prototype of auto scaler functionality to scale the instances that are mapped to a specific target/queue/destination based on some external monitoring engine that would recommend the action to take. The monitoring aspect is outside of this autoscaler and its more of a end invoker to change the instance scales. The monitoring system should poll or monitor the end state actively (resources or queues or other systems) to come up with the final decision before handling off the scaling action to the autoscaler.
+This is a experimental prototype of auto scaler functionality to scale the instances that are mapped to a specific target/queue/destination based on some external monitoring engine that would recommend the action to take. 
 
-Run "go get ..." to install the dependencies and then run "go install" to install the autoscaler binary
+The monitoring aspect is outside of this autoscaler and its more of a end invoker to change the instance based on request to scale up or down. The monitoring system should poll or monitor the end state actively (resources or queue depth or other constraints) to come up with the decision to scale bnd handling off the scaling action to the autoscaler.
 
-# Running
+Run "go get ..." to install the dependencies and then run "go install" to install the autoscaler binary to run locally.
+For testing on CF, just following the section below.
+
+# Running on CF or Locally
 There are two ways to test:
-1) Push this as an app to CF 
+1) Push this as an application to CF 
 2) Just run the autoscaler locally with CF 
 
 The autoscaler application would require three environment variables to set for the Application to scale the managed app instances. Check the Credentials page of the Pivotal Elastic Runtime to get the following property (under UAA -> client section):
 ```
+Sample entry inside the Ops Mgr -> Elastic Runtime Tile -> Credentials tab -> Search for Autoscaling
+
 Autoscale Client Credentials  autoscaling_service / fe20d9a573c60b220a02
 ```
 .
@@ -19,7 +24,7 @@ Autoscale Client Credentials  autoscaling_service / fe20d9a573c60b220a02
 * UAA_CLIENT_SECRET
   This should be set to the generated password or associated password for the corresponding client `autoscaling_service`
 * DOMAIN
-  This should be set to the system sub-domain path (without protocol, ex: `10.244.0.34.xip.io` if running against some xip addr or `system.cf-app.com`)
+  This should be set to the CF's system domain path (without protocol, ex: `10.244.0.34.xip.io` if running against some xip addr or `system.cf-app.com`)
 
 If running the autoscaler app locally (not inside CF), do exports of the variable
 ```
@@ -33,6 +38,9 @@ If running the autoscaler app by pushing to CF, use set-env to set the variables
   cf set-env autoscaler UAA_CLIENT_SECRET _FILL_ME_
   cf set-env autoscaler DOMAIN            _FILL_ME_   #Example: 10.244.0.34.xip.io
 ```
+
+# Persistence
+Its possible to allow mysql service binding to be used for persisting the app state to survive restarts/crashes. Uncomment the services section inside the manifest and specify the service instance name. Any new registration of apps against targets would be persisted to DB and reloaded on startup.
 
 # Running the appscaler locally
 The appscaler uses default port of 8080 (which can be overridden via an Env variable PORT that can specify a different port).
@@ -81,6 +89,7 @@ Following are the REST style endpoints exposed to take action:
 # To run on CF
 
 Autoscaler needs a UAA Client created ahead of time that has the requisite privileges to change the instance count of any app managed by it.
+If there is already autoscaling tile installed (part of PCF install), then the same set of client credentials can be used.
 
 # UAA Client Token for managing Autoscaling
 Steps to create the UAA Client with right permissions:

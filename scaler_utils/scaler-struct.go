@@ -1,11 +1,11 @@
 package scaler_utils
 
 type AppDetail struct {
-  Target  string `json:"queue"`
-  AppName string `json:"app"`
-  Org     string `json:"org"`
-  Space   string `json:"space"`
-  Updated int64  `db:"updated"`
+  Target  string `db:"target"  json:"queue"`
+  AppName string `db:"appname" json:"app"`
+  Org     string `db:"org"     json:"org"`
+  Space   string `db:"space"   json:"space"`
+  Updated int64  `db:"updated" json:"-"`
 }
 
 type AppInstanceDetail struct {

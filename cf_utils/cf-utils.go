@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"io/ioutil"
@@ -13,34 +14,50 @@ import (
 )
 
 var (
-	auth_token string
+	auth_token      string
 	cf_api_endpoint string
-	DEBUG bool = false
-	uaaEnv uaac.UAAEnvironment
-	orgGuidMap = make(map[string]string)
+	uaaEnv          uaac.UAAEnvironment
+	
+	DEBUG        = false
+	orgGuidMap   = make(map[string]string)
 	spaceGuidMap = make(map[string]string)
-	appGuidMap = make(map[string]string)
+	appGuidMap   = make(map[string]string)
 )
 
 func init() {
 
 	// json parsing will get screwed up if CF_TRACE is enabled that would emit non-json contents
+	if debug_log := os.Getenv("DEBUG_CF"); debug_log != "" {
+		DEBUG = true
+	}
+	
 	uaaEnv = uaac.UaaEnvironment()
 	token, _ := uaac.UAAClient()
+	
+	//cf_api_endpoint = uaaEnv.Scheme + "://api." + uaaEnv.Domain
+	cf_api_endpoint = "https://api." + uaaEnv.Domain
 	
 	// Token comes with braces: { ... } , strip that
 	auth_token = fmt.Sprintf("%s", token)
 	auth_token = strings.Replace(auth_token, "{", "", -1)
 	auth_token = strings.Replace(auth_token, "}", "", -1)
 	
-	fmt.Sprintf("Auth Token: %s\n", auth_token)
-	
-	
-	//cf_api_endpoint = uaaEnv.Scheme + "://api." + uaaEnv.Domain
-	cf_api_endpoint = "https://api." + uaaEnv.Domain
+	logDebug(fmt.Sprintf("Auth Token: %s", auth_token))
+	logDebug(fmt.Sprintf("UAA Endpoint: %s", cf_api_endpoint))
+}
+
+func logDebug(msg string) {
+	if (DEBUG) {
+		fmt.Println("CF: " + msg)
+	}
 }
 
 /*
+func cf_curl_authorization_header() string{
+	//return fmt.Sprintf(" -H 'Authorization: bearer %s'", UAAToken())
+	return fmt.Sprintf(" -H 'Authorization: bearer %s'", UAAToken())
+}
+
 func setup_using_cli() {
 	setupCfCli()
 	setupCfTarget("api.10.244.0.34.xip.io", "admin", "admin") 
@@ -191,18 +208,37 @@ func invoke_cf_curl_post(resource string, postData string) {
 	}
 }
 
+/*
+func FindAppInstances(appGuid string) int{
+  fmt.Printf("Inside FindAppInstances....")
 
+  byteArr := invoke_cf_curl_get("/apps/" + appGuid + "/summary" )
+
+  fmt.Printf("App Summary raw output is %s\n", byteArr)
+  //fmt.Printf("App Stats output is %v\n", response)
+  //fmt.Println("Instance Details for App: ", response["0"])
+
+  var appSummaryErrorResponse ErrorResponse
+  json.Unmarshal(byteArr, &appSummaryErrorResponse)
+  //fmt.Printf("App Error Stats output is %v\n", appStateErrorResponse)
+  //fmt.Printf("Error description %s", appStateErrorResponse.Description)
+  if (appSummaryErrorResponse.Description != "") {
+
+	  var appDetailSummary AppDetail
+	  json.Unmarshal(byteArr, &appDetailSummary)
+	  fmt.Printf("Got App Summary : %v", appDetailSummary)
+
+	  return appDetailSummary.Instances
+
+  }
+  return 0
+}
 */
 
 func UAAToken() string {
-	return fmt.Sprintf("%s", auth_token)
-	
+	return fmt.Sprintf("%s", auth_token)	
 }
 
-func cf_curl_authorization_header() string{
-	//return fmt.Sprintf(" -H 'Authorization: bearer %s'", UAAToken())
-	return fmt.Sprintf(" -H 'Authorization: bearer %s'", UAAToken())
-}
 
 func set_headers(req *http.Request) {
 
@@ -216,7 +252,6 @@ func invoke_cf_get(resource string) []byte {
 	VERSION := "/v2"
 	
 	uri := ENDPOINT + VERSION + resource
-	DEBUG := false
 	
     req, err := http.NewRequest("GET", uri, bytes.NewReader([]byte (resource)))
 	
@@ -235,12 +270,12 @@ func invoke_cf_get(resource string) []byte {
     defer resp.Body.Close()
 
     body, _ := ioutil.ReadAll(resp.Body)
-	if DEBUG {
-		fmt.Println("Request :", req)
-	    fmt.Println("Response Status:", resp.Status)
-	    fmt.Println("Response Headers:", resp.Header)    	
-    	fmt.Println("Response Body:", string(body))
-	}
+	
+	logDebug(fmt.Sprintf("Request: %v", req))
+    logDebug(fmt.Sprintf("Response Status: %d", resp.Status))
+    logDebug(fmt.Sprintf("Response Headers: %s", resp.Header))   	
+	logDebug(fmt.Sprintf("Response Body: %s", string(body)))
+
 	return body	
 }
 
@@ -251,7 +286,6 @@ func invoke_cf_with_payload(resource string, action string, postData string) {
 	VERSION := "/v2"
 	
 	uri := ENDPOINT + VERSION + resource
-	DEBUG := false
 	
     req, err := http.NewRequest(action, uri, bytes.NewReader([]byte (postData)))
 	
@@ -269,12 +303,9 @@ func invoke_cf_with_payload(resource string, action string, postData string) {
     defer resp.Body.Close()
 
     _, _ = ioutil.ReadAll(resp.Body)
-	if DEBUG {
-		fmt.Println("Request :", req)
-	    fmt.Println("Response Status:", resp.Status)
-	    fmt.Println("Response Headers:", resp.Header)    	
-    	//fmt.Println("Response Body:", string(body))
-	}
+	logDebug(fmt.Sprintf("Request: %v", req))
+    logDebug(fmt.Sprintf("Response Status: %d", resp.Status))
+    logDebug(fmt.Sprintf("Response Headers: %v", resp.Header))    	
 	return
 }
 
@@ -333,7 +364,7 @@ func findOrgGuid(orgName string) string {
 		}
 	}
 
-	fmt.Printf("\nError!! Could not locate org matching: %s\n", orgName)
+	fmt.Printf("Error!! Could not locate org matching: %s\n", orgName)
 	return ""
 }
 
@@ -347,7 +378,7 @@ func findSpaceGuid(spaceName string, orgGuid string) string {
 			return space.Metadata.Guid
 		}
 	}
-	fmt.Printf("\nError!! Could not locate space matching: %s\n", spaceName)
+	fmt.Printf("Error!! Could not locate space matching: %s\n", spaceName)
 	return ""
 }
 
@@ -370,33 +401,7 @@ func findApp(appName string, spaceGuid string) map[string]string {
 		}
 	}
 
-	fmt.Printf("\nError!! Could not locate app matching: %s\n", appName)
+	fmt.Printf("Error!! Could not locate app matching: %s\n", appName)
 	return result
 }
 
-/*
-func FindAppInstances(appGuid string) int{
-  fmt.Printf("Inside FindAppInstances....")
-
-  byteArr := invoke_cf_curl_get("/apps/" + appGuid + "/summary" )
-
-  fmt.Printf("App Summary raw output is %s\n", byteArr)
-  //fmt.Printf("App Stats output is %v\n", response)
-  //fmt.Println("Instance Details for App: ", response["0"])
-
-  var appSummaryErrorResponse ErrorResponse
-  json.Unmarshal(byteArr, &appSummaryErrorResponse)
-  //fmt.Printf("App Error Stats output is %v\n", appStateErrorResponse)
-  //fmt.Printf("Error description %s", appStateErrorResponse.Description)
-  if (appSummaryErrorResponse.Description != "") {
-
-	  var appDetailSummary AppDetail
-	  json.Unmarshal(byteArr, &appDetailSummary)
-	  fmt.Printf("Got App Summary : %v", appDetailSummary)
-
-	  return appDetailSummary.Instances
-
-  }
-  return 0
-}
-*/

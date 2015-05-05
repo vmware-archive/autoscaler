@@ -23,7 +23,8 @@ var (
 	appInstanceMap      map[string]scalerutils.AppInstanceDetail
 )
 
-// On Cache Expiration of 1 min, reload the app instance data
+// Save app details with expiration of 60 seconds
+// reload the app instance data if request comes for app details after the duration 
 const cache_expiration = 60
 
 func init() {
@@ -39,26 +40,35 @@ func init() {
 	fmt.Printf("  Listen Port: %s !!\n", listen_port)
 	fmt.Printf("  Instance default increment set to: %d !!\n\n", unit_increment)
 	fmt.Printf("  Instance Cache Expiration set to: %d seconds !!\n", cache_expiration)
+	
+	appDetailsMap = make(map[string]scalerutils.AppDetail)
+	appInstanceMap = make(map[string]scalerutils.AppInstanceDetail)
+
+	// Load persisted information into memory
+	// We are only persisting and reloading app data (org/space/app name and not instances)
+	// The app instance information can be stale and its better to get that from CF
+	if (scalerutils.IsDBEnabled()) {
+		appDetails := scalerutils.Load()
+		for _, appDetail := range appDetails {
+			register(appDetail, false)
+		}
+	}
 }
 
 func main() {
 
 	//var appDetailsMapMutex = &sync.Mutex{}
-	appDetailsMap = make(map[string]scalerutils.AppDetail)
-	appInstanceMap = make(map[string]scalerutils.AppInstanceDetail)
-
 	gorest.RegisterMarshaller("application/json", gorest.NewJSONMarshaller())
 	gorest.RegisterService(new(AppAutoScalerService)) //Register our service
 	http.Handle("/", gorest.Handle())
 	http.ListenAndServe(":"+listen_port, nil)
 	
-	if (scalerutils.DBEnabled()) {
-		fmt.Printf("Persistence Enabled\n")
-		appDetails := scalerutils.Load()
-		fmt.Printf("Got rows: %#v\n", appDetails)
-		for _, appDetail := range appDetails {
-			register(appDetail, false)
-		}
+	defer close()	
+}
+
+func close() {
+	if (scalerutils.IsDBEnabled()) {
+		scalerutils.CloseDB()
 	}	
 }
 
@@ -87,11 +97,13 @@ func (serv AppAutoScalerService) Register(appDetail scalerutils.AppDetail) {
 	register(appDetail, true)
 }
 	
+// Private method to handle both new incoming registrations 
+// as well as loading up saved app details 
+// isNew is false for reloading previously persisted data
 func register(appDetail scalerutils.AppDetail, isNew bool) {
 
 	fmt.Printf("\nRegistering App ... %#v", appDetail)
-	fmt.Printf("\nIs this via a user registration? ... %v", isNew)
-	
+		
 	destnName := appDetail.Target
 
 	lockDebug("AD Write", "register", "Locking")
@@ -100,12 +112,14 @@ func register(appDetail scalerutils.AppDetail, isNew bool) {
 	appDetailsMapMutex.Unlock()
 	lockDebug("AD Write", "register", "Released")
 	
-	if (scalerutils.DBEnabled() && isNew) {
+	if (scalerutils.IsDBEnabled() && isNew) {
 		scalerutils.Insert(appDetail)
 	}
 	
 
-	// Get the actual instance count...
+	// Get the actual instance count... from CF
+	// A map of Guid and Instance count is returned by cfutils.FindApp, 
+	// using 'guid' and 'instances' as keys
 	appGuidInstanceDetail := cfutils.FindApp(appDetail.Org, appDetail.Space, appDetail.AppName)
 
 	var instances int
@@ -261,7 +275,7 @@ func (serv AppAutoScalerService) Deregister(target string) {
 	lockDebug("AI Write", "deregister", "Released")
 	
 	appDetail := appDetailsMap[target]
-	if (scalerutils.DBEnabled()) {
+	if (scalerutils.IsDBEnabled()) {
 		scalerutils.Delete(appDetail)
 	}
 	
