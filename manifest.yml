@@ -6,6 +6,8 @@ applications:
     buildpack: https://github.com/cloudfoundry/buildpack-go.git
     env:
       # EDIT the following variables
+      DEBUG_UAAC: false
+      DEBUG_LOCK: false
       UAA_CLIENT_ID: autoscaling_service
       UAA_CLIENT_SECRET: _FILL_ME_
       DOMAIN: _FILL_ME_

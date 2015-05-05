@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-var uaaEnv UAAEnvironment
+var (
+	DEBUG = false
+	uaaEnv UAAEnvironment
+)
 
 func init() {
 
@@ -27,8 +30,18 @@ func init() {
 		UAAHost:         uaaHost,
 		VerifySSL:       verifySSL,
 	}
+	
 
-	fmt.Printf("\nDEBUG: UAA Environment created: %#v\n", uaaEnv)
+	if debug_log := os.Getenv("DEBUG_UAAC"); debug_log != "" {
+		DEBUG = true
+	}
+	logDebug(fmt.Sprintf("UAA Environment created: %#v\n", uaaEnv))
+}
+
+func logDebug(msg string) {
+	if (DEBUG) {
+		fmt.Println(msg)
+	}
 }
 
 func UaaEnvironment() UAAEnvironment {
@@ -53,7 +66,7 @@ func UAAClient() (Token, error) {
 
 	host := uri.Scheme + "://" + uri.Host
 
-	fmt.Printf("\nDEBUG: Basic Auth UAA Client connecting to Host: %s\n", host)
+	logDebug("Basic Auth UAA Client connecting to Host: " + host)
 
 	client := NewClient(host, uaaEnv.VerifySSL)
 	client = client.WithBasicAuthCredentials(uaaEnv.UAAClientID, uaaEnv.UAAClientSecret)
@@ -61,11 +74,11 @@ func UAAClient() (Token, error) {
 	_, body, err := client.MakeRequest("POST", uri.RequestURI(), 
 	                          strings.NewReader(params.Encode()))
 	if err != nil {
-		fmt.Printf("\nERROR! Error connecting to UAA: %s\n" + err.Error())
+		fmt.Printf("ERROR! Error connecting to UAA: %s\n" + err.Error())
 		return token, err
 	}
 
 	json.Unmarshal(body, &token)
-	fmt.Printf("\nSuccessfully retreived auth token!\n")
+	logDebug("Successfully retreived auth token!")
 	return token, nil
 }

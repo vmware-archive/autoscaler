@@ -15,6 +15,7 @@ import (
 var (
 	api_endpoint        string
 	unit_increment      = 1
+	DEBUG_LOCK          = false
 	listen_port         string
 	appDetailsMapMutex  = &sync.RWMutex{}
 	appInstanceMapMutex = &sync.RWMutex{}
@@ -28,6 +29,10 @@ const cache_expiration = 60
 func init() {
 	if listen_port = os.Getenv("PORT"); listen_port == "" {
 		listen_port = "8080"
+	}
+	
+	if debug_lock := os.Getenv("DEBUG_LOCK"); debug_lock != "" {
+		DEBUG_LOCK = true
 	}
 
 	fmt.Printf("App Auto Scaler Properties\n")
@@ -46,6 +51,15 @@ func main() {
 	gorest.RegisterService(new(AppAutoScalerService)) //Register our service
 	http.Handle("/", gorest.Handle())
 	http.ListenAndServe(":"+listen_port, nil)
+	
+	if (scalerutils.DBEnabled()) {
+		fmt.Printf("Persistence Enabled\n")
+		appDetails := scalerutils.Load()
+		fmt.Printf("Got rows: %#v\n", appDetails)
+		for _, appDetail := range appDetails {
+			register(appDetail, false)
+		}
+	}	
 }
 
 //Service Definition
@@ -63,20 +77,33 @@ type AppAutoScalerService struct {
 	scaleDown gorest.EndPoint `method:"PUT" path:"/scale/{destnName:string}/down/{increments:int}" postdata:"string" `
 }
 
+func lockDebug(lockType string, activity string, step string) {
+	if (DEBUG_LOCK) {
+		fmt.Printf("%s (%s)-Lock from %s\n", activity, lockType, step )
+	}
+}
+
 func (serv AppAutoScalerService) Register(appDetail scalerutils.AppDetail) {
+	register(appDetail, true)
+}
+	
+func register(appDetail scalerutils.AppDetail, isNew bool) {
 
 	fmt.Printf("\nRegistering App ... %#v", appDetail)
+	fmt.Printf("\nIs this via a user registration? ... %v", isNew)
+	
 	destnName := appDetail.Target
 
-	//fmt.Printf("Getting AD Write lock")
+	lockDebug("AD Write", "register", "Locking")
 	appDetailsMapMutex.Lock()
 	appDetailsMap[destnName] = appDetail
 	appDetailsMapMutex.Unlock()
+	lockDebug("AD Write", "register", "Released")
 	
-	if (scalerutils.DBEnabled()) {
+	if (scalerutils.DBEnabled() && isNew) {
 		scalerutils.Insert(appDetail)
 	}
-	//fmt.Printf("Released AD Write lock")
+	
 
 	// Get the actual instance count...
 	appGuidInstanceDetail := cfutils.FindApp(appDetail.Org, appDetail.Space, appDetail.AppName)
@@ -96,17 +123,15 @@ func (serv AppAutoScalerService) Register(appDetail scalerutils.AppDetail) {
 		return
 	}
 
-	fmt.Printf("\nApp: %s under org: %s, space: %s, app guid: %s, instances: %d", appDetail.AppName, appDetail.Org, appDetail.Space, appGuid, instances)
+	fmt.Printf("\nApp: %s under org: %s, space: %s, app guid: %s, instances: %d\n", appDetail.AppName, appDetail.Org, appDetail.Space, appGuid, instances)
 
 	appInstanceDetails := scalerutils.AppInstanceDetail{destnName, appDetail.AppName, appGuid, instances, time.Now().Unix()}
 
-	//fmt.Printf("Getting AI Write lock")
+	lockDebug("AI Write", "register", "Locking")
 	appInstanceMapMutex.Lock()
 	appInstanceMap[destnName] = appInstanceDetails
 	appInstanceMapMutex.Unlock()
-	
-	
-	//fmt.Printf("Released AI Write lock")
+	lockDebug("AI Write", "register", "Released")
 }
 
 func (serv AppAutoScalerService) Load(appDetails []scalerutils.AppDetail) {
@@ -119,26 +144,27 @@ func getDetail(target string) string {
 
 	var output string
 	curTime := time.Now().Unix()
-	appInstance := appInstanceMap[target]
+	
+	lockDebug("AI Read", "detail", "Locking")
+	appInstanceMapMutex.RLock()	
+	appInstance := appInstanceMap[target]	
+	appInstanceMapMutex.RUnlock()
+	lockDebug("AI Read", "detail", "Released")
 	
 	if (curTime - appInstance.LastFetchTime) < cache_expiration {
-
-		//fmt.Printf("Getting AI Read lock")
-		appInstanceMapMutex.RLock()
+		
 		output = fmt.Sprintf("{ 'queue' : '%s', 'app' : '%s', 'instances': '%d'}\n", target, appInstance.AppName, appInstance.Instances)
-		appInstanceMapMutex.RUnlock()
-		//fmt.Printf("Released AI Read lock")
-
+		
 		return output
 	}
 
+	lockDebug("AD Read", "detail", "Locking")
+    appDetailsMapMutex.RLock()
 	appDetail := appDetailsMap[target]
+	appDetailsMapMutex.RUnlock()
+	lockDebug("AD Read", "detail", "Released")
+	
 	appGuidInstanceDetail := cfutils.FindApp(appDetail.Org, appDetail.Space, appDetail.AppName)
-
-	// Acquire Lock before updating...
-	//fmt.Printf("Getting AI Write lock")
-	appInstanceMapMutex.Lock()
-	//fmt.Printf("Got AI Write lock")
 
 	if appGuid := appGuidInstanceDetail["guid"]; appGuid != "" {
 		instanceCount, err := strconv.Atoi(appGuidInstanceDetail["instances"])
@@ -158,15 +184,25 @@ func getDetail(target string) string {
 		fmt.Printf("\nError!! Failed to locate App : %s in Org: %s, Space: %s\n", appDetail.AppName, appDetail.Org, appDetail.Space)
 
 		output = fmt.Sprintf("\nError!! Failed to locate App : %s in Org: %s, Space: %s\n", appDetail.AppName, appDetail.Org, appDetail.Space)
+		
+		// Acquire Lock before updating...
+		lockDebug("AI Write", "update as not-found", "Locking")
+		appInstanceMapMutex.Lock()
+		appInstanceMap[target] = appInstance
+		appInstanceMapMutex.Unlock()
+		lockDebug("AI Write", "update as not-found", "Released")
+		return output
 	}
 
 	// Update Last fetch time
 	appInstance.LastFetchTime = time.Now().Unix()
-	appInstanceMap[target] = appInstance
 
-	// Release lock
+	// Acquire Lock before updating...
+	lockDebug("AI Write", "update detail", "Locking")
+	appInstanceMapMutex.Lock()
+	appInstanceMap[target] = appInstance
 	appInstanceMapMutex.Unlock()
-	//fmt.Printf("Released AI Write lock")
+	lockDebug("AI Write", "update detail", "Released")
 
 	return output
 }
@@ -217,32 +253,35 @@ func isAppNil(app scalerutils.AppDetail) bool {
 }
 
 func (serv AppAutoScalerService) Deregister(target string) {
-	//fmt.Printf("Getting AI Write lock")
+
+	lockDebug("AI Write", "deregister", "Locking")
 	appInstanceMapMutex.Lock()
 	deleteAppInstanceDetail(target)
 	appInstanceMapMutex.Unlock()
-	//fmt.Printf("Releasing AI Write lock")
-
-	//fmt.Printf("Getting AD Write lock")
+	lockDebug("AI Write", "deregister", "Released")
+	
 	appDetail := appDetailsMap[target]
 	if (scalerutils.DBEnabled()) {
 		scalerutils.Delete(appDetail)
 	}
 	
+	lockDebug("AD Write", "deregister", "Locking")
 	appDetailsMapMutex.Lock()
 	deleteAppDetail(target)
 	appDetailsMapMutex.Unlock()
-	//fmt.Printf("Releasing AD Write lock")
+	lockDebug("AD Write", "deregister", "Released")
 	
 }
 
 func (serv AppAutoScalerService) Scale(target string, increments int, up bool) {
 
-	//fmt.Printf("Getting AI Write lock")
+	lockDebug("AI Write", "scale", "Locking")
 	appInstanceMapMutex.Lock()
 	appInstanceDetails := appInstanceMap[target]
 	if isAppInstanceNil(appInstanceDetails) {
 		fmt.Printf("Error!! App Instance not found for %s\n", target)
+		appInstanceMapMutex.Unlock()
+		lockDebug("AI Write", "scale", "Released")
 		return
 	}
 
@@ -265,7 +304,7 @@ func (serv AppAutoScalerService) Scale(target string, increments int, up bool) {
 
 	appInstanceMap[target] = appInstanceDetails
 	appInstanceMapMutex.Unlock()
-	//fmt.Printf("Releasing AI Write lock")
+	lockDebug("AI Write", "scale", "Released")
 
 	fmt.Printf("\nScaling[%s] App : { 'queue' : '%s', 'app' : '%s', 'instances': '%d'}\n", direction, target, appInstanceDetails.AppName, appInstanceDetails.Instances)
 

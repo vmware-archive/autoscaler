@@ -40,26 +40,26 @@ func init() {
 	}
 	//fmt.Printf("Unmarshalled: %#v\n", creds)
 	fmt.Printf("Vcap Services: %#v\n", vcapServices)
-
-  if (len(vcapServices.MySqlServiceDefn) == 0 &&
-      len(vcapServices.MongoDbServiceDefn) == 0) {
-		dbEnabled = false
+    if (len(vcapServices.MySqlServiceDefn) == 0 ) {
+   		dbEnabled = false
 		return
- }
+	}
 	
 	dbString := vcapServices.MySqlServiceDefn[0].Credentials.Uri
-	if (dbType == "MongoDb") {
-		dbString = vcapServices.MongoDbServiceDefn[0].Credentials.Uri
-	} 
+//	if (dbType == "MongoDb") {
+//		dbString = vcapServices.MongoDbServiceDefn[0].Credentials.Uri
+//	} 
 	InitDB(dbString)
 	
 	if (dbmap != nil) {
 		dbEnabled = true
+		fmt.Printf("Persistence enabled!!\n")
 		defer CloseDB()
-	}
+	}	
 }
 
 func DBEnabled() bool {
+	fmt.Printf("Persistence: Is DB Enabled: %v\n", dbEnabled)
 	return dbEnabled
 }
 
@@ -73,7 +73,11 @@ func InitDB(dbConnectionInfo string) {
 
 	// construct a gorp DbMap
 	dbmap := &gorp.DbMap{Db: db, Dialect: gorp.MySQLDialect{"InnoDB", "UTF8"}}
-	table := dbmap.AddTable(AppDetail{}).SetKeys(true, "Target")
+	table := dbmap.AddTableWithName(AppDetail{}, "appdetails").SetKeys(true, "Target")
+	
+	err = dbmap.CreateTablesIfNotExists()
+	checkErr(err, "Create tables failed")
+		
 	fmt.Printf("Created Table: %#v\n", table)
 }
 
@@ -81,6 +85,45 @@ func CloseDB() {
 	if (dbmap != nil) {
 		dbmap.Db.Close()
 	}
+}
+
+func checkErr(err error, msg string) {
+    if err != nil {
+        log.Fatalln(msg, err)
+    }
+}
+
+func Get(target string) AppDetail {
+	var nilApp AppDetail
+	if dbmap == nil {
+		log.Fatalln("\nCall InitDb() first!")
+		return nilApp
+	}
+	
+	//appDetail, err := dbmap.Get(AppDetail{}, target)
+	var appDetail AppDetail
+	_, err := dbmap.Select(&appDetail, "select * from appdetails where trader = ?", target)
+	if err != nil {
+		log.Fatalln("Error selecting AppDetail with target name: %s from DB, %s", target, err)
+		return nilApp
+	}
+	return appDetail
+}
+
+func Load() []AppDetail {
+	var nilApps []AppDetail
+	if dbmap == nil {
+		log.Fatalln("\nCall InitDb() first!")
+		return nilApps
+	}
+	
+	var appDetails []AppDetail
+	_, err := dbmap.Select(&appDetails, "select * from appdetails LIMIT 50")
+	if err != nil {
+		log.Fatalln("Error loading AppDetail from DB: %s", err)
+		return nilApps
+	}
+	return appDetails
 }
 
 func Insert(appDetail AppDetail) {

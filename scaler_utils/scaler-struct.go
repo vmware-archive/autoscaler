@@ -39,7 +39,7 @@ type VcapServiceTypeDefn struct {
 //       if going with MongoDB
 type VcapServices struct {
 	MySqlServiceDefn []VcapServiceTypeDefn `json:"cleardb-n/a"`
-	MongoDbServiceDefn []VcapServiceTypeDefn `json:"mongodb-1.8`
+//	MongoDbServiceDefn []VcapServiceTypeDefn `json:"mongodb-1.8`
 }
 
 
