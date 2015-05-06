@@ -7,14 +7,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"io/ioutil"
 	"net/http"
 	"crypto/tls"
    "github.com/cf-platform-eng/autoscaler/uaac"
 )
 
+const TOKEN_VALIDITY_DURATION int64 = 1800
+
 var (
 	auth_token      string
+	token_obtained  int64
 	cf_api_endpoint string
 	uaaEnv          uaac.UAAEnvironment
 	
@@ -24,6 +28,7 @@ var (
 	appGuidMap   = make(map[string]string)
 )
 
+
 func init() {
 
 	// json parsing will get screwed up if CF_TRACE is enabled that would emit non-json contents
@@ -32,25 +37,21 @@ func init() {
 	}
 	
 	uaaEnv = uaac.UaaEnvironment()
-	token, _ := uaac.UAAClient()
+	
 	
 	//cf_api_endpoint = uaaEnv.Scheme + "://api." + uaaEnv.Domain
 	cf_api_endpoint = "https://api." + uaaEnv.Domain
 	
-	// Token comes with braces: { ... } , strip that
-	auth_token = fmt.Sprintf("%s", token)
-	auth_token = strings.Replace(auth_token, "{", "", -1)
-	auth_token = strings.Replace(auth_token, "}", "", -1)
-	
-	logDebug(fmt.Sprintf("Auth Token: %s", auth_token))
-	logDebug(fmt.Sprintf("UAA Endpoint: %s", cf_api_endpoint))
+	refreshAuthToken()
 }
+
 
 func logDebug(msg string) {
 	if (DEBUG) {
 		fmt.Println("CF: " + msg)
 	}
 }
+
 
 /*
 func cf_curl_authorization_header() string{
@@ -235,7 +236,41 @@ func FindAppInstances(appGuid string) int{
 }
 */
 
+
+func refreshAuthToken() {	
+	
+	token, _ := uaac.UAAClient()
+	
+	// Token comes with braces: { ... } , strip that
+	auth_token = fmt.Sprintf("%s", token)
+	auth_token = strings.Replace(auth_token, "{", "", -1)
+	auth_token = strings.Replace(auth_token, "}", "", -1)
+	
+	logDebug(fmt.Sprintf("Auth Token: %s", auth_token))
+	logDebug(fmt.Sprintf("UAA Endpoint: %s", cf_api_endpoint))
+	token_obtained = time.Now().Unix()
+}
+
 func UAAToken() string {
+	
+	// Refresh the Auth token if over 30 minutes duration
+	// By default, autoscaling_service has a duration of 3600 seconds 
+	// Just to be safe, use 30 minutes as duration for custom client token
+	/*
+		autoscaling_service:
+          id: autoscaling_service
+          secret: "********"
+          override: true
+          autoapprove: true
+          authorities: cloud_controller.write,cloud_controller.read,cloud_controller.admin,notifications.write,critical_notifications.write,emails.write
+          authorized-grant-types: client_credentials,authorization_code,refresh_token
+          scope: openid,cloud_controller.permissions,cloud_controller.read,cloud_controller.write
+          access-token-validity: 3600
+	*/
+	if (time.Now().Unix() - token_obtained > TOKEN_VALIDITY_DURATION) {
+		refreshAuthToken()
+	}
+	
 	return fmt.Sprintf("%s", auth_token)	
 }
 
