@@ -1,3 +1,5 @@
+# autoscaler is no longer actively maintained by VMware.
+
 # autoscaler
 This is a experimental prototype of auto scaler functionality to scale the instances that are mapped to a specific target/queue/destination based on some external monitoring engine that would recommend the action to take. 
 
